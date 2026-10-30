@@ -1,6 +1,16 @@
 # Work planner for Windows
 
-A quiet desktop planner for one person on one Windows PC. This initial milestone is **local only**: Microsoft sign-in, email monitoring, Azure DevOps sync, global capture shortcut, and automatic collapse are not implemented yet. The Connections view reports this explicitly. No email is sent.
+A quiet desktop planner for one person on one Windows PC. Azure DevOps tickets can now be imported with a personal access token. Email integration, global capture shortcut, and automatic collapse are not implemented yet. No email is sent.
+
+## Connect Azure DevOps
+
+Open Today → Workspace → Connections. Enter your organisation name (for example `contoso` from `https://dev.azure.com/contoso`) and a user-created PAT with **Work Items (Read)** scope. Choose Import / refresh my tickets. No app registration is needed for this PAT connection. Your organisation must permit PATs and your account must already have project access.
+
+The PAT uses Basic authentication over HTTPS, stays in memory for the current app session, and is not saved to the database or logged. Forget token clears it; exiting clears it too. Closing the window only hides it and retains the session. Enter the token again after restarting.
+
+Refresh is manual in this milestone. The importer queries work assigned to the PAT owner across accessible projects, discovers each work item type's workflow categories, and imports unfinished items into Backlog. Repeated imports update existing records without resetting local state, priority, Today order, or reply reminders. Previously imported assigned items can refresh to a completed Azure state without silently completing the local task. Items no longer assigned to you retain their last confirmed snapshot; this version does not separately refresh those items. Large result sets exceeding Azure DevOps query limits will fail visibly rather than silently truncate. Refresh is applied only after all requests succeed.
+
+Rows show project, type, Azure priority, confirmed Azure state, confirmation time, description excerpt, and a ticket link. Remote descriptions are displayed as text. Local completion **does not update Azure DevOps**. Work Items (Read & Write) and a separate explicit update workflow would be needed for state changes.
 
 ## Run on Windows
 
@@ -33,6 +43,6 @@ Core/persistence tests run on Linux too. The Windows desktop project can be cros
 - Desktop: WPF compact panel, workspace, and tray lifecycle.
 - Tests: real SQLite restart, duplicate daily planning, rollover, ordering, and reply persistence.
 
-Next: UI editing/filtering and event history; global capture hotkey and automatic collapse; MSAL work-account sign-in; Graph unread suggestions and conversation tracking; Azure DevOps reads; configurable state mappings and durable update retries. Microsoft integration requires an approved Entra app registration and delegated access; existing user access alone does not grant the application access.
+Next: UI editing/filtering and event history; global capture hotkey and automatic collapse; connecting the user's existing email application once its supported access method is known; automatic sync; configurable Azure state mappings and durable update retries. Microsoft Graph delegated access, if used directly, requires an appropriate app registration; Azure DevOps PAT reads do not.
 
 V1 email access will be read-only. Replies will open in Outlook and be marked handled manually. Local task state must remain separate from confirmed Azure state. Imported content must always be treated as data, never as executable instructions.

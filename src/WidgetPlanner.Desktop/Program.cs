@@ -1,6 +1,8 @@
 using System;
 using System.IO;
 using System.Linq;
+using System.Net.Http;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -47,6 +49,31 @@ public sealed class PlannerWindow : Window
     private string tab = "Today";
     private readonly System.Windows.Threading.DispatcherTimer dayTimer = new() { Interval = TimeSpan.FromMinutes(1) };
     private DateOnly shownDay;
+    private readonly TextBox organization = new() { MaxLength = 100, Padding = new Thickness(6) };
+    private readonly PasswordBox pat = new() { Padding = new Thickness(6) };
+    private bool syncing;
+    private string syncStatus = "Azure DevOps: not connected";
+
+    private async Task SyncAzure()
+    {
+        if (syncing) return;
+        syncing = true;
+        syncStatus = "Reading assigned Azure DevOps tickets…";
+        var org = organization.Text;
+        var token = pat.Password;
+        Render();
+        try
+        {
+            using var http = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false }) { Timeout = TimeSpan.FromSeconds(60) };
+            var items = await new AzureDevOpsClient(http).ReadAssignedAsync(org, token);
+            planner.ImportAzure(items);
+            syncStatus = $"Last successful read: {DateTime.Now:t} · {items.Count} assigned items checked";
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        { syncStatus = "Connection failed or timed out. Existing tasks are unchanged. Retry when connected."; }
+        catch (Exception ex) { syncStatus = ex.Message; }
+        finally { syncing = false; Render(); }
+    }
 
     public PlannerWindow(Planner planner)
     {
@@ -108,7 +135,19 @@ public sealed class PlannerWindow : Window
         switch (active)
         {
             case "Connections":
-                Label("Microsoft 365: not connected\nAzure DevOps: not connected\n\nThis milestone is local only. No emails are read or sent, and no tickets are changed. Authentication and sync will be added in subsequent milestones.");
+                Label("Microsoft 365: not connected — existing email application details are needed.");
+                Label(syncStatus);
+                Label("Azure DevOps organisation name (the part after dev.azure.com/)");
+                body.Children.Add(organization);
+                Label("Personal access token — Work Items (Read). Kept in memory for this session only.");
+                body.Children.Add(pat);
+                var sync = Button(syncing ? "Reading…" : "Import / refresh my tickets", async () => await SyncAzure());
+                sync.IsEnabled = !syncing;
+                body.Children.Add(sync);
+                var clear = Button("Forget token", () => { pat.Clear(); syncStatus = "Token cleared. Imported tasks remain available."; Render(); });
+                clear.IsEnabled = !syncing;
+                body.Children.Add(clear);
+                Label("Read-only connection: local completion never changes a ticket in Azure DevOps. Refresh is manual. Closing or exiting the app does not delete imported tasks; exiting clears the token.");
                 Label("Closing the window hides it in the system tray. Use the tray menu to exit. Local data is saved after each change.");
                 break;
             case "Review":
@@ -130,6 +169,15 @@ public sealed class PlannerWindow : Window
     private void TaskRow(PlannerTask task, bool backlog)
     {
         Label($"{task.Priority} · {task.Title}");
+        if (task.Azure is { } azure)
+        {
+            Label($"{azure.Project} · #{azure.Id} · {azure.Type}\nAzure: {azure.State} · Azure priority: {azure.AzurePriority?.ToString() ?? "—"}\nLast confirmed: {azure.LastConfirmedAt.LocalDateTime:g}");
+            body.Children.Add(Button("Open Azure DevOps ticket", () => Run(() =>
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(azure.Url) { UseShellExecute = true }))));
+            var description = System.Net.WebUtility.HtmlDecode(System.Text.RegularExpressions.Regex.Replace(azure.Description, "<[^>]*>", " "));
+            if (description.Length > 600) description = description[..600] + "…";
+            if (!string.IsNullOrWhiteSpace(description)) Label(description);
+        }
         var row = new WrapPanel();
         var state = new ComboBox { ItemsSource = Enum.GetValues<PlanningState>(), SelectedItem = task.State, Margin = new Thickness(0, 4, 6, 4) };
         state.SelectionChanged += (_, _) => Run(() => planner.SetState(task.Id, (PlanningState)state.SelectedItem));

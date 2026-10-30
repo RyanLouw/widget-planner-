@@ -42,6 +42,17 @@ public sealed class PlannerTests : IDisposable
         Assert.Throws<ArgumentException>(() => planner.Add("  "));
         Assert.Equal(2, new Planner(Store()).Snapshot.Tasks.Count);
     }
+    [Fact] public void ImportedTicketSurvivesRestartAndRefreshWithoutDuplicates()
+    {
+        var planner = new Planner(Store());
+        var item = new AzureWorkItem("example", "Project", 42, "Fix", "Bug", "Active", "InProgress", 2,
+            "Description", "https://dev.azure.com/example/Project/_workitems/edit/42", DateTimeOffset.UtcNow);
+        planner.ImportAzure([item]);
+        var restarted = new Planner(Store());
+        Assert.Equal(item, Assert.Single(restarted.Snapshot.Tasks).Azure);
+        restarted.ImportAzure([item with { State = "Resolved" }]);
+        Assert.Equal("Resolved", Assert.Single(new Planner(Store()).Snapshot.Tasks).Azure!.State);
+    }
     public void Dispose() { Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools(); if (Directory.Exists(directory)) Directory.Delete(directory, true); }
     private sealed class Clock : TimeProvider
     {

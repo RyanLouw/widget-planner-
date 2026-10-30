@@ -3,7 +3,13 @@ namespace WidgetPlanner.Core;
 public enum PlanningState { ToDo, InProgress, Blocked, Done }
 public enum Priority { Urgent, High, Normal, Low }
 public sealed record PlannerTask(Guid Id, string Title, Priority Priority, PlanningState State,
-    DateTimeOffset CreatedAt, DateTimeOffset? CompletedAt, bool ReplyRequired, bool ReplyHandled);
+    DateTimeOffset CreatedAt, DateTimeOffset? CompletedAt, bool ReplyRequired, bool ReplyHandled)
+{
+    public AzureWorkItem? Azure { get; init; }
+}
+public sealed record AzureWorkItem(string Organization, string Project, int Id, string Title,
+    string Type, string State, string StateCategory, int? AzurePriority, string Description,
+    string Url, DateTimeOffset LastConfirmedAt);
 public sealed record DayEntry(DateOnly Date, Guid TaskId, int Position, bool Unexpected);
 public sealed record PlannerSnapshot(IReadOnlyList<PlannerTask> Tasks, IReadOnlyList<DayEntry> Days);
 public sealed record DailyReview(IReadOnlyList<PlannerTask> Planned, IReadOnlyList<PlannerTask> Unexpected,
@@ -55,6 +61,21 @@ public sealed class Planner(IPlannerStore store, TimeProvider? clock = null)
     public void SetState(Guid id, PlanningState state) => Update(id, t => t with
     { State = state, CompletedAt = state == PlanningState.Done ? time.GetUtcNow() : null });
     public void HandleReply(Guid id) => Update(id, t => t with { ReplyHandled = true });
+    public int ImportAzure(IReadOnlyList<AzureWorkItem> items)
+    {
+        var tasks = Snapshot.Tasks.ToList();
+        foreach (var item in items)
+        {
+            var index = tasks.FindIndex(t => t.Azure is { } a && a.Id == item.Id &&
+                string.Equals(a.Organization, item.Organization, StringComparison.OrdinalIgnoreCase));
+            if (index >= 0) tasks[index] = tasks[index] with { Title = item.Title, Azure = item };
+            else if (item.StateCategory is not ("Completed" or "Removed"))
+                tasks.Add(new PlannerTask(Guid.NewGuid(), item.Title, Priority.Normal, PlanningState.ToDo,
+                    time.GetUtcNow(), null, false, false) { Azure = item });
+        }
+        Persist(Snapshot with { Tasks = tasks });
+        return items.Count;
+    }
     public void RequireReply(Guid id) => Update(id, t => t with { ReplyRequired = true, ReplyHandled = false });
     public DailyReview Review(DateOnly date)
     {
